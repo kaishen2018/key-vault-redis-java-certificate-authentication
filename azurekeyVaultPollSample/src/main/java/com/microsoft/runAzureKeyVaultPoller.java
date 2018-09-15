@@ -1,34 +1,39 @@
 package com.microsoft;
 
 
-import com.microsoft.aad.adal4j.AsymmetricKeyCredential;
-import com.microsoft.aad.adal4j.AuthenticationContext;
-import com.microsoft.aad.adal4j.AuthenticationResult;
 import com.microsoft.azure.keyvault.KeyVaultClient;
-import com.microsoft.azure.keyvault.authentication.KeyVaultCredentials;
-import com.microsoft.azure.keyvault.models.*;
+import com.microsoft.azure.keyvault.models.KeyBundle;
+import com.microsoft.azure.keyvault.models.KeyItem;
+import com.microsoft.azure.keyvault.models.SecretBundle;
+import com.microsoft.azure.keyvault.models.SecretItem;
 import com.microsoft.azure.keyvault.requests.CreateKeyRequest;
 import com.microsoft.azure.keyvault.requests.SetSecretRequest;
 import com.microsoft.azure.keyvault.webkey.JsonWebKeySignatureAlgorithm;
 import com.microsoft.azure.keyvault.webkey.JsonWebKeyType;
+import com.microsoft.rest.ServiceCallback;
 import com.microsoft.rest.ServiceFuture;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.sync.RedisCommands;
+import io.lettuce.core.cluster.RedisClusterClient;
+import io.lettuce.core.cluster.api.StatefulRedisClusterConnection;
+import io.lettuce.core.cluster.api.sync.RedisAdvancedClusterCommands;
+import io.lettuce.core.codec.Utf8StringCodec;
+import io.lettuce.core.masterslave.MasterSlave;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Configurable;
-import org.springframework.stereotype.Service;
+import org.springframework.util.Assert;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.security.*;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
-import java.util.Enumeration;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.SignatureException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.logging.Logger;
 
 /**
  * Azure key Vault example,
@@ -53,6 +58,16 @@ public class runAzureKeyVaultPoller
     @Autowired
     public static SignVerifySamplesKeyVault azureSignVerifier;
 
+    private static final Logger logger = Logger.getLogger(runAzureKeyVaultPoller.class.getName());
+
+    private static final String REDIS_PRIMARY_PWD = "https://kaisaykeyvault.vault.azure.net/secrets/redis-password-primary";
+
+    private static final String REDIS_SECONDARY_PWD = "https://kaisaykeyvault.vault.azure.net/secrets/redis-password-secondary";
+
+    private static final String REDIS2_PRIMARY_PWD = "https://kaisaykeyvault.vault.azure.net/secrets/redis2-password-primary";
+
+    private static final String REDIS2_SECONDARY_PWD = "https://kaisaykeyvault.vault.azure.net/secrets/redis2-password-secondary";
+
     public static void main( String[] args )
     {
         try{
@@ -68,12 +83,97 @@ public class runAzureKeyVaultPoller
 
             KeyVaultClient kvClient = authenticator.getAuthentication(path, pfxPassword, clientId);
 
-            runSample(kvClient, vaultUrl);
+//            runSample(kvClient, vaultUrl);
+
+            runRedisConnect(kvClient,vaultUrl);
+
+//            runRedisClusterConnect(kvClient,vaultUrl);
         }
         catch(Exception e){
             e.printStackTrace();
         }
 }
+
+    private static List<RedisURI> preConnect(KeyVaultClient kvClient, String redisUri, int redishost) {
+        String primaryPwd = "";
+        String secondaryPwd = "";
+        switch (redishost) {
+            case 1 :
+                primaryPwd = kvClient.getSecret(REDIS_PRIMARY_PWD).value();
+                secondaryPwd = kvClient.getSecret(REDIS_SECONDARY_PWD).value();
+                break;
+            case 2 :
+                primaryPwd = kvClient.getSecret(REDIS2_PRIMARY_PWD).value();
+                secondaryPwd = kvClient.getSecret(REDIS2_SECONDARY_PWD).value();
+                break;
+
+        }
+
+        List<RedisURI> nodes = Arrays.asList(
+                RedisURI.Builder.redis(redisUri)
+                        .withPassword(primaryPwd)
+                        .withSsl(true)
+                        .withPort(6380)
+                        .build(),
+                RedisURI.Builder.redis(redisUri)
+                        .withPassword(secondaryPwd)
+                        .withSsl(true)
+                        .withPort(6380)
+                        .build()
+        );
+        return nodes;
+    }
+
+    private static void runRedisClusterConnect(KeyVaultClient kvClient, String vaultUrl) {
+        /**
+         *         List<RedisURI> nodes = Arrays.asList(
+         *                 RedisURI.Builder.redis(redisUri)
+         *                         .withPassword(primaryPwd)
+         *                         .withSsl(true)
+         *                         .withPort(6380)
+         *                         .build(),
+         *                 RedisURI.Builder.redis(redisUri)
+         *                         .withPassword(secondaryPwd)
+         *                         .withSsl(true)
+         *                         .withPort(6380)
+         *          RedisClusterClient clusterClient = RedisClusterClient.create(nodes)
+         */
+        RedisClusterClient clusterClient = RedisClusterClient.create(preConnect(kvClient,"kvjavaapp2.redis.cache.windows.net",2));
+        StatefulRedisClusterConnection<String, String> connection = clusterClient.connect();
+        RedisAdvancedClusterCommands<String, String> syncCommands = connection.sync();
+        syncCommands.set("key", "Hello, Redis!");
+        Assert.isTrue("Hello, Redis!".equals(syncCommands.get("key")));
+        logger.info("finish putting a key into redis cluster, closing");
+        connection.close();
+        clusterClient.shutdown();
+    }
+
+    private static void runRedisConnect(KeyVaultClient kvClient, String vaultUrl) {
+
+        RedisClient redisClient = RedisClient.create();
+
+        StatefulRedisConnection<String, String> connection = MasterSlave.connect(redisClient,new Utf8StringCodec(),
+                preConnect(kvClient,"kvjavaapp1.redis.cache.windows.net",1));
+
+        RedisCommands<String, String> syncCommands = connection.sync();
+
+        syncCommands.set("key", "Hello, Redis!");
+
+        connection.close();
+        redisClient.shutdown();
+        kvClient.getSecretAsync("https://kaisaykeyvault.vault.azure.net/secrets/redis-password-primary",
+                new ServiceCallback<SecretBundle>() {
+            @Override
+            public void failure(Throwable t) {
+                logger.severe("get password fail");
+            }
+
+            @Override
+            public void success(SecretBundle result) {
+                logger.info("try to create connection to Redis");
+            }
+        });
+    }
 
     /**
      * Run the polling of Key Vault, and sign and verify operations

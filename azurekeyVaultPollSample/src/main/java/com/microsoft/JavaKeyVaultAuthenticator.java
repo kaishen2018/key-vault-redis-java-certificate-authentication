@@ -6,6 +6,7 @@ import com.microsoft.aad.adal4j.AuthenticationResult;
 import com.microsoft.azure.keyvault.KeyVaultClient;
 import com.microsoft.azure.keyvault.authentication.KeyVaultCredentials;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 import java.io.FileInputStream;
@@ -75,16 +76,18 @@ public class JavaKeyVaultAuthenticator {
 	public static KeyCert readPfx(String path, String password) throws NoSuchProviderException, KeyStoreException,
 			IOException, NoSuchAlgorithmException, CertificateException, UnrecoverableKeyException {
 
-		try (FileInputStream stream = new FileInputStream(path)) {
+		try (InputStream stream = new ClassPathResource(path).getInputStream()) {
 			KeyCert keyCert = new KeyCert(null, null);
 
 			boolean isAliasWithPrivateKey = false;
 
 			// Access Java keystore
+			// PKCS#12 files, often with extension .p12 or sometimes .pfx
+			// JEP 229 Create PKCS12 Keystores by Default. http://openjdk.java.net/jeps/229
 			final KeyStore store = KeyStore.getInstance("pkcs12", "SunJSSE");
 
 			// Load Java Keystore with password for access
-			store.load((InputStream) stream, password.toCharArray());
+			store.load(stream, password.toCharArray());
 
 			// Iterate over all aliases to find the private key
 			Enumeration<String> aliases = store.aliases();

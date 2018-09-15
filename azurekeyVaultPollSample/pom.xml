@@ -80,6 +80,13 @@
       <artifactId>client-runtime</artifactId>
       <version>1.0.0</version>
     </dependency>
+    <dependency>
+      <groupId>io.lettuce</groupId>
+      <artifactId>lettuce-core</artifactId>
+      <version>5.0.5.RELEASE</version>
+    </dependency>
+
+
 
     <!-- https://mvnrepository.com/artifact/org.bouncycastle/bcprov-jdk16
     <dependency>
