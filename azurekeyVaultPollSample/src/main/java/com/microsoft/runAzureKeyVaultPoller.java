@@ -98,7 +98,7 @@ public class runAzureKeyVaultPoller
 
     private static void runRedisClusterConnect(KeyVaultClient kvClient, String vaultUrl) {
         String primaryPwd = kvClient.getSecret(REDIS_PRIMARY_PWD).value();
-        RedisURI masterUri = RedisURI.Builder.redis("standard.redis.cache.windows.net", 6380)
+        RedisURI masterUri = RedisURI.Builder.redis("premium.redis.cache.windows.net", 6380)
                 .withPassword(primaryPwd)
                 .withSsl(true)
                 .withPort(6380)
