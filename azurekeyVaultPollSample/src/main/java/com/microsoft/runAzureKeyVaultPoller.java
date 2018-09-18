@@ -87,58 +87,23 @@ public class runAzureKeyVaultPoller
 
             runRedisConnect(kvClient,vaultUrl);
 
-//            runRedisClusterConnect(kvClient,vaultUrl);
+            runRedisClusterConnect(kvClient,vaultUrl);
+
+//            runSimpleTest(kvClient,vaultUrl);
         }
         catch(Exception e){
             e.printStackTrace();
         }
 }
 
-    private static List<RedisURI> preConnect(KeyVaultClient kvClient, String redisUri, int redishost) {
-        String primaryPwd = "";
-        String secondaryPwd = "";
-        switch (redishost) {
-            case 1 :
-                primaryPwd = kvClient.getSecret(REDIS_PRIMARY_PWD).value();
-                secondaryPwd = kvClient.getSecret(REDIS_SECONDARY_PWD).value();
-                break;
-            case 2 :
-                primaryPwd = kvClient.getSecret(REDIS2_PRIMARY_PWD).value();
-                secondaryPwd = kvClient.getSecret(REDIS2_SECONDARY_PWD).value();
-                break;
-
-        }
-
-        List<RedisURI> nodes = Arrays.asList(
-                RedisURI.Builder.redis(redisUri)
-                        .withPassword(primaryPwd)
-                        .withSsl(true)
-                        .withPort(6380)
-                        .build(),
-                RedisURI.Builder.redis(redisUri)
-                        .withPassword(secondaryPwd)
-                        .withSsl(true)
-                        .withPort(6380)
-                        .build()
-        );
-        return nodes;
-    }
-
     private static void runRedisClusterConnect(KeyVaultClient kvClient, String vaultUrl) {
-        /**
-         *         List<RedisURI> nodes = Arrays.asList(
-         *                 RedisURI.Builder.redis(redisUri)
-         *                         .withPassword(primaryPwd)
-         *                         .withSsl(true)
-         *                         .withPort(6380)
-         *                         .build(),
-         *                 RedisURI.Builder.redis(redisUri)
-         *                         .withPassword(secondaryPwd)
-         *                         .withSsl(true)
-         *                         .withPort(6380)
-         *          RedisClusterClient clusterClient = RedisClusterClient.create(nodes)
-         */
-        RedisClusterClient clusterClient = RedisClusterClient.create(preConnect(kvClient,"kvjavaapp2.redis.cache.windows.net",2));
+        String primaryPwd = kvClient.getSecret(REDIS_PRIMARY_PWD).value();
+        RedisURI masterUri = RedisURI.Builder.redis("standard.redis.cache.windows.net", 6380)
+                .withPassword(primaryPwd)
+                .withSsl(true)
+                .withPort(6380)
+                .build();
+        RedisClusterClient clusterClient = RedisClusterClient.create(masterUri);
         StatefulRedisClusterConnection<String, String> connection = clusterClient.connect();
         RedisAdvancedClusterCommands<String, String> syncCommands = connection.sync();
         syncCommands.set("key", "Hello, Redis!");
@@ -146,14 +111,23 @@ public class runAzureKeyVaultPoller
         logger.info("finish putting a key into redis cluster, closing");
         connection.close();
         clusterClient.shutdown();
+
+
     }
+
 
     private static void runRedisConnect(KeyVaultClient kvClient, String vaultUrl) {
 
+        String primaryPwd = kvClient.getSecret(REDIS_PRIMARY_PWD).value();
+        RedisURI masterUri = RedisURI.Builder.redis("standard.redis.cache.windows.net", 6380)
+                .withPassword(primaryPwd)
+                .withSsl(true)
+                .withPort(6380)
+                .build();
         RedisClient redisClient = RedisClient.create();
 
         StatefulRedisConnection<String, String> connection = MasterSlave.connect(redisClient,new Utf8StringCodec(),
-                preConnect(kvClient,"kvjavaapp1.redis.cache.windows.net",1));
+                masterUri);
 
         RedisCommands<String, String> syncCommands = connection.sync();
 
